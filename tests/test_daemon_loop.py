@@ -12,11 +12,17 @@ from fan_daemon.daemon import (
 class FakeSensors:
     """Scriptable fake sysfs: temps come from a sequence, pwm/enable are recorded."""
 
-    def __init__(self, cpu_temps_c: list[float], gpu_temps_c: list[float]):
+    def __init__(
+        self,
+        cpu_temps_c: list[float],
+        gpu_temps_c: list[float],
+        simulate_busy_until_manual: bool = False,
+    ):
         self._cpu_temps = iter(cpu_temps_c)
         self._gpu_temps = iter(gpu_temps_c)
         self.pwm_writes: list[tuple[int, int]] = []
         self.pwm_enable: dict[int, int] = {}
+        self.simulate_busy_until_manual = simulate_busy_until_manual
 
     def read_cpu_temp(self) -> int:
         return int(next(self._cpu_temps) * 1000)
@@ -28,6 +34,11 @@ class FakeSensors:
         return self.pwm_enable.get(header, 1)
 
     def write_pwm(self, header: int, value: int) -> None:
+        # Real nct6775 hardware rejects a direct pwm write with EBUSY while
+        # pwm*_enable is still in an auto mode - mirrors that here so tests
+        # can catch a write-before-self-heal ordering regression.
+        if self.simulate_busy_until_manual and self.pwm_enable.get(header) != 1:
+            raise OSError(16, "Device or resource busy")
         self.pwm_writes.append((header, value))
 
     def write_pwm_enable(self, header: int, value: int) -> None:
@@ -73,6 +84,23 @@ def test_run_iteration_self_heals_pwm_enable(make_config):
     run_iteration(config, sensors.io(), state)
 
     assert sensors.pwm_enable == {2: 1, 4: 1}
+
+
+def test_run_iteration_self_heals_before_writing_pwm(make_config):
+    """Regression test: on a fresh install (or after a BIOS reset), the chip
+    rejects a direct pwm write with EBUSY while pwm_enable is still in an
+    auto mode - self-heal must flip it to manual before the write is
+    attempted, not after, or the very first control-loop pass always fails."""
+    config = make_config(fan_headers=(2,))
+    sensors = FakeSensors(cpu_temps_c=[40.0], gpu_temps_c=[45.0], simulate_busy_until_manual=True)
+    sensors.pwm_enable = {2: 5}  # BIOS auto mode, as it is right after install
+    state = build_loop_state(config)
+
+    written = run_iteration(config, sensors.io(), state)
+
+    assert sensors.pwm_enable == {2: 1}
+    assert written == {2: 64}
+    assert sensors.pwm_writes == [(2, 64)]
 
 
 def test_run_iteration_holds_last_known_temp_on_read_failure(make_config):

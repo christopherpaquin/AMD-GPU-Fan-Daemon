@@ -129,6 +129,18 @@ def run_iteration(config: Config, io: Io, state: LoopState) -> dict[int, int]:
 
     written = {}
     for header in config.fan_headers:
+        # Self-heal must run before the pwm write, not after: the chip
+        # rejects direct pwm writes with EBUSY while pwm*_enable is still
+        # in an auto mode (e.g. right after install, before the first
+        # manual-mode write lands) - writing the value first and fixing
+        # the mode second guarantees that race on every fresh start.
+        try:
+            if io.read_pwm_enable(header) != PWM_ENABLE_MANUAL:
+                io.write_pwm_enable(header, PWM_ENABLE_MANUAL)
+                logger.info("self-heal: re-asserted pwm%d_enable=manual", header)
+        except OSError:
+            logger.exception("failed to self-heal pwm%d_enable", header)
+
         gate = state.gates[header]
         if gate.should_write(driving_temp, target):
             try:
@@ -136,13 +148,6 @@ def run_iteration(config: Config, io: Io, state: LoopState) -> dict[int, int]:
                 written[header] = target
             except OSError:
                 logger.exception("failed to write pwm%d", header)
-
-        try:
-            if io.read_pwm_enable(header) != PWM_ENABLE_MANUAL:
-                io.write_pwm_enable(header, PWM_ENABLE_MANUAL)
-                logger.info("self-heal: re-asserted pwm%d_enable=manual", header)
-        except OSError:
-            logger.exception("failed to self-heal pwm%d_enable", header)
 
     return written
 
