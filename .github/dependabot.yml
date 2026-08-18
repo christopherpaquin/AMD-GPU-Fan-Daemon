@@ -1,0 +1,13 @@
+# package-ecosystem list trimmed to what this project actually uses:
+# github-actions (workflow versions) and pip (dev-only, pytest/ruff via
+# requirements-dev.txt - the daemon itself has zero runtime dependencies).
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"

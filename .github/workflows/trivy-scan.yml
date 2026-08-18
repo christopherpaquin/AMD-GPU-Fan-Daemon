@@ -1,0 +1,40 @@
+# Template for .github/workflows/trivy-scan.yml - the other half of the
+# "basic, not-too-advanced" vulnerability-scanning requirement (alongside
+# dependabot.yml). Scans the repo filesystem (dependency manifests, if any)
+# and IaC config (Dockerfiles, Compose files, Quadlet .container units) for
+# known CVEs and misconfigurations.
+#
+# Deliberately scoped to CRITICAL/HIGH only and non-blocking by default
+# (exit-code 0) - this is meant to surface real, actionable findings in the
+# PR/Security tab, not fail simple scripts-only repos on low-severity noise.
+# Flip exit-code to 1 for a repo where you want it to actually gate merges.
+name: Trivy Scan
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  security-events: write
+jobs:
+  trivy:
+    name: Trivy (filesystem + config)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Run Trivy (fs + config)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: "fs"
+          scan-ref: "."
+          severity: "CRITICAL,HIGH"
+          exit-code: "0"
+          format: "sarif"
+          output: "trivy-results.sarif"
+      - name: Upload results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: "trivy-results.sarif"
