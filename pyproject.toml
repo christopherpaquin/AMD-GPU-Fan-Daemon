@@ -13,3 +13,7 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Makes fan_daemon importable regardless of invocation style (bare `pytest`
+# vs `python -m pytest`) - bare `pytest` doesn't add the repo root to
+# sys.path the way `python -m pytest` does, which is a plain CWD insertion.
+pythonpath = ["."]
